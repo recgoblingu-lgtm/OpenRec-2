@@ -1,9 +1,29 @@
 # OpenRec-2
 
-Hi, this is OpenRec-2.
+OpenRec-2 is a modular C# server backend for legacy Rec Room-compatible clients.
 
-I plan on creating a universal and modular server backend for RecRoom, one to be hosted both locally and on servers for mutliplayer.
+## Current capabilities
 
-I plan on supporting 2016 RecRoom first, and then working my way up until 2023 if possible using OpenRec as a template.
+- Configurable server identity, supported client version, region, CDN URI, request size, and CORS
+- Health and readiness endpoints
+- Runtime status endpoint with uptime, request, error, and concurrency metrics
+- Prometheus-compatible text metrics
+- Request correlation IDs through `X-Request-Id`
+- Structured JSON errors for exceptions and missing routes
+- Existing legacy API dispatch compatibility
+- File-backed storage through `DatabaseManager`
 
-Feel free to submit requests for any features to be added!
+## Run
+
+```bash
+dotnet run --urls http://localhost:5229
+```
+
+The default endpoints are:
+
+- `GET /health`
+- `GET /ready`
+- `GET /api/v1/status`
+- `GET /metrics`
+
+The project targets .NET 10 and reads server settings from `appsettings.json`.
