@@ -30,6 +30,7 @@ public static class Server
         builder.Services.AddSingleton<ChatService>();
         builder.Services.AddSingleton<CustomRoomService>();
         builder.Services.AddSingleton<InventoryService>();
+        builder.Services.AddSingleton<AvatarService>();
         builder.WebHost.ConfigureKestrel(options =>
         {
             var limit = builder.Configuration.GetValue<int?>("Server:MaxRequestBodySize") ?? 10485760;
@@ -46,6 +47,7 @@ public static class Server
         var chat = app.Services.GetRequiredService<ChatService>();
         var customRooms = app.Services.GetRequiredService<CustomRoomService>();
         var inventories = app.Services.GetRequiredService<InventoryService>();
+        var avatars = app.Services.GetRequiredService<AvatarService>();
 
         if (options.EnableCors)
         {
@@ -472,6 +474,76 @@ public static class Server
             }
             var item = inventories.Grant(request);
             return item is null ? Results.BadRequest(new { error = "invalid_inventory_item" }) : Results.Ok(item);
+        });
+
+        app.MapGet("/api/v1/avatar", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : Results.Ok(avatars.GetProfile(user.Id));
+        });
+
+        app.MapPut("/api/v1/avatar", async (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var request = await context.Request.ReadFromJsonAsync<UpdateAvatarRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_avatar" });
+            }
+            var profile = avatars.UpdateProfile(user.Id, request);
+            return profile is null ? Results.BadRequest(new { error = "invalid_avatar" }) : Results.Ok(profile);
+        });
+
+        app.MapGet("/api/v1/avatar/clothing", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : Results.Ok(new { clothing = avatars.ListClothing(user.Id) });
+        });
+
+        app.MapPut("/api/v1/avatar/clothing/{itemId}/equip", async (string itemId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var request = await context.Request.ReadFromJsonAsync<InventoryEquipRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var item = avatars.SetEquipped(user.Id, itemId, request.Equipped);
+            return item is null ? Results.NotFound(new { error = "clothing_item_not_found" }) : Results.Ok(item);
+        });
+
+        app.MapDelete("/api/v1/avatar/clothing/{itemId}", (string itemId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : avatars.RemoveClothing(user.Id, itemId) ? Results.NoContent() : Results.NotFound(new { error = "clothing_item_not_found" });
+        });
+
+        app.MapPost("/api/v1/avatar/clothing/grant", async (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (!moderation.IsModerator(user))
+            {
+                return Results.Forbid();
+            }
+            var request = await context.Request.ReadFromJsonAsync<GrantClothingRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var item = avatars.GrantClothing(request);
+            return item is null ? Results.BadRequest(new { error = "invalid_clothing_item" }) : Results.Ok(item);
         });
 
         app.Run(async context =>

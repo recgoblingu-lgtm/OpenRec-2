@@ -10,7 +10,7 @@ The server provides account registration and login with salted PBKDF2 password h
 
 Social features include friend requests, acceptance, decline, removal, and friend-list retrieval. Moderation features include user reports, configurable moderator roles, temporary or permanent bans, unbanning, moderator report and ban queues, blocked-word chat filtering, and chat restrictions for banned users.
 
-Player inventories support item grants, quantities, categories, metadata, equipped state, inventory listing, quantity updates, and moderator-controlled grants.
+Player inventories support item grants, quantities, categories, metadata, equipped state, inventory listing, quantity updates, and moderator-controlled grants. Avatar profiles support body and eye colors, skin materials, hair styles, face styles, height and head scales, and validated updates. Clothing management supports wardrobe listing, slot-based equip exclusivity, clothing removal, metadata, asset identifiers, and moderator grants.
 
 ## Run
 
@@ -18,8 +18,8 @@ Player inventories support item grants, quantities, categories, metadata, equipp
 dotnet run --urls http://localhost:5229
 ```
 
-The service exposes `GET /health`, `GET /ready`, `GET /api/v1/status`, and `GET /metrics`. Authentication is available under `/api/v1/auth`, room management and chat are available under `/api/v1/rooms`, room customization is available under `/api/v1/rooms/{id}/customization`, friend features are available under `/api/v1/friends`, moderation is available under `/api/v1/moderation`, and inventories are available under `/api/v1/inventory`.
+The service exposes `GET /health`, `GET /ready`, `GET /api/v1/status`, and `GET /metrics`. Authentication is available under `/api/v1/auth`, room management and chat are available under `/api/v1/rooms`, room customization is available under `/api/v1/rooms/{id}/customization`, friend features are available under `/api/v1/friends`, moderation is available under `/api/v1/moderation`, inventories are available under `/api/v1/inventory`, and avatars and clothing are available under `/api/v1/avatar`.
 
-Set `Server:ModeratorUsernames` and `Server:BlockedChatWords` in `appsettings.json` to configure moderation. The current account, session, room, customization, inventory, social, and moderation stores are process-local and should be replaced with durable storage before production deployment.
+Set `Server:ModeratorUsernames` and `Server:BlockedChatWords` in `appsettings.json` to configure moderation. The current account, session, room, customization, inventory, avatar, clothing, social, and moderation stores are process-local and should be replaced with durable storage before production deployment.
 
 The project targets .NET 10.
