@@ -28,6 +28,8 @@ public static class Server
         builder.Services.AddSingleton<ModerationService>();
         builder.Services.AddSingleton<FriendshipService>();
         builder.Services.AddSingleton<ChatService>();
+        builder.Services.AddSingleton<CustomRoomService>();
+        builder.Services.AddSingleton<InventoryService>();
         builder.WebHost.ConfigureKestrel(options =>
         {
             var limit = builder.Configuration.GetValue<int?>("Server:MaxRequestBodySize") ?? 10485760;
@@ -42,6 +44,8 @@ public static class Server
         var moderation = app.Services.GetRequiredService<ModerationService>();
         var friendships = app.Services.GetRequiredService<FriendshipService>();
         var chat = app.Services.GetRequiredService<ChatService>();
+        var customRooms = app.Services.GetRequiredService<CustomRoomService>();
+        var inventories = app.Services.GetRequiredService<InventoryService>();
 
         if (options.EnableCors)
         {
@@ -110,6 +114,7 @@ public static class Server
             sessions = auth.SessionCount,
             rooms = rooms.Count,
             moderationReports = moderation.Reports().Count,
+            customizedRooms = customRooms.Count,
             uptimeSeconds = (long)(DateTimeOffset.UtcNow - metrics.StartedAt).TotalSeconds,
             requests = metrics.Requests,
             errors = metrics.Errors,
@@ -123,6 +128,7 @@ public static class Server
             $"openrec_users_total {auth.UserCount}\n" +
             $"openrec_rooms_total {rooms.Count}\n" +
             $"openrec_moderation_reports {moderation.Reports().Count}\n" +
+            $"openrec_customized_rooms {customRooms.Count}\n" +
             $"openrec_uptime_seconds {(long)(DateTimeOffset.UtcNow - metrics.StartedAt).TotalSeconds}\n",
             "text/plain"));
 
@@ -354,6 +360,118 @@ public static class Server
             }
             var message = chat.Add(user, id, request.Content, moderation.ContainsBlockedWord(request.Content));
             return message is null ? Results.BadRequest(new { error = "message_rejected" }) : Results.Created($"/api/v1/rooms/{id}/chat", message);
+        });
+
+        app.MapGet("/api/v1/rooms/{id:guid}/customization", (Guid id) =>
+        {
+            var room = rooms.Get(id);
+            if (room is null)
+            {
+                return Results.NotFound(new { error = "room_not_found" });
+            }
+            return Results.Ok(customRooms.Get(id));
+        });
+
+        app.MapPut("/api/v1/rooms/{id:guid}/customization", async (Guid id, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var room = rooms.Get(id);
+            if (room is null)
+            {
+                return Results.NotFound(new { error = "room_not_found" });
+            }
+            if (room.OwnerId != user.Id)
+            {
+                return Results.Forbid();
+            }
+            var request = await context.Request.ReadFromJsonAsync<CustomizeRoomRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_customization" });
+            }
+            var customization = customRooms.Upsert(id, user, request);
+            return customization is null ? Results.BadRequest(new { error = "invalid_customization" }) : Results.Ok(customization);
+        });
+
+        app.MapDelete("/api/v1/rooms/{id:guid}/customization", (Guid id, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var room = rooms.Get(id);
+            if (room is null)
+            {
+                return Results.NotFound(new { error = "room_not_found" });
+            }
+            return room.OwnerId == user.Id && customRooms.Delete(id, user) ? Results.NoContent() : Results.Forbid();
+        });
+
+        app.MapGet("/api/v1/inventory", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : Results.Ok(new { items = inventories.List(user.Id) });
+        });
+
+        app.MapPut("/api/v1/inventory/{itemId}/equip", async (string itemId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var request = await context.Request.ReadFromJsonAsync<InventoryEquipRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var item = inventories.SetEquipped(user.Id, itemId, request.Equipped);
+            return item is null ? Results.NotFound(new { error = "inventory_item_not_found" }) : Results.Ok(item);
+        });
+
+        app.MapPut("/api/v1/inventory/{userId:guid}/{itemId}/quantity", async (Guid userId, string itemId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (user.Id != userId && !moderation.IsModerator(user))
+            {
+                return Results.Forbid();
+            }
+            var request = await context.Request.ReadFromJsonAsync<InventoryQuantityRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var item = inventories.SetQuantity(userId, itemId, request.Quantity);
+            return request.Quantity == 0 || item is not null ? Results.Ok(item) : Results.NotFound(new { error = "inventory_item_not_found" });
+        });
+
+        app.MapPost("/api/v1/inventory/grant", async (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (!moderation.IsModerator(user))
+            {
+                return Results.Forbid();
+            }
+            var request = await context.Request.ReadFromJsonAsync<InventoryGrantRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var item = inventories.Grant(request);
+            return item is null ? Results.BadRequest(new { error = "invalid_inventory_item" }) : Results.Ok(item);
         });
 
         app.Run(async context =>
