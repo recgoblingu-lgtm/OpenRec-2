@@ -9,6 +9,8 @@ public sealed class ServerOptions
     public string CloudRegion { get; set; } = "us";
     public int MaxRequestBodySize { get; set; } = 10485760;
     public bool EnableCors { get; set; } = true;
+    public string[] CorsOrigins { get; set; } = ["*"];
+    public int RequestsPerMinute { get; set; } = 120;
     public string[] ModeratorUsernames { get; set; } = [];
     public string[] BlockedChatWords { get; set; } = [];
 }

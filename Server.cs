@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using System.Threading.RateLimiting;
 using Microsoft.Extensions.Options;
 using OpenRec_2.API;
 
@@ -31,6 +32,20 @@ public static class Server
         builder.Services.AddSingleton<CustomRoomService>();
         builder.Services.AddSingleton<InventoryService>();
         builder.Services.AddSingleton<AvatarService>();
+        builder.Services.AddRateLimiter(rateOptions =>
+        {
+            rateOptions.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            rateOptions.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Server:RequestsPerMinute") ?? 120),
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+        });
         builder.WebHost.ConfigureKestrel(options =>
         {
             var limit = builder.Configuration.GetValue<int?>("Server:MaxRequestBodySize") ?? 10485760;
@@ -49,11 +64,19 @@ public static class Server
         var inventories = app.Services.GetRequiredService<InventoryService>();
         var avatars = app.Services.GetRequiredService<AvatarService>();
 
+        app.UseRateLimiter();
+
         if (options.EnableCors)
         {
             app.Use(async (context, next) =>
             {
-                context.Response.Headers.AccessControlAllowOrigin = "*";
+                var origin = context.Request.Headers.Origin.FirstOrDefault();
+                var allowedOrigin = options.CorsOrigins.Contains("*") || origin is not null && options.CorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase) ? origin ?? "*" : null;
+                if (allowedOrigin is not null)
+                {
+                    context.Response.Headers.AccessControlAllowOrigin = allowedOrigin;
+                    context.Response.Headers.Vary = "Origin";
+                }
                 context.Response.Headers.AccessControlAllowMethods = "GET,POST,PUT,DELETE,OPTIONS";
                 context.Response.Headers.AccessControlAllowHeaders = "Content-Type,Authorization,X-Rec-Room-Version,X-Request-Id";
                 if (HttpMethods.IsOptions(context.Request.Method))
