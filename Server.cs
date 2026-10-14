@@ -25,6 +25,9 @@ public static class Server
         builder.Services.AddSingleton<ServerMetrics>();
         builder.Services.AddSingleton<AuthService>();
         builder.Services.AddSingleton<RoomService>();
+        builder.Services.AddSingleton<ModerationService>();
+        builder.Services.AddSingleton<FriendshipService>();
+        builder.Services.AddSingleton<ChatService>();
         builder.WebHost.ConfigureKestrel(options =>
         {
             var limit = builder.Configuration.GetValue<int?>("Server:MaxRequestBodySize") ?? 10485760;
@@ -36,6 +39,9 @@ public static class Server
         var metrics = app.Services.GetRequiredService<ServerMetrics>();
         var auth = app.Services.GetRequiredService<AuthService>();
         var rooms = app.Services.GetRequiredService<RoomService>();
+        var moderation = app.Services.GetRequiredService<ModerationService>();
+        var friendships = app.Services.GetRequiredService<FriendshipService>();
+        var chat = app.Services.GetRequiredService<ChatService>();
 
         if (options.EnableCors)
         {
@@ -103,6 +109,7 @@ public static class Server
             users = auth.UserCount,
             sessions = auth.SessionCount,
             rooms = rooms.Count,
+            moderationReports = moderation.Reports().Count,
             uptimeSeconds = (long)(DateTimeOffset.UtcNow - metrics.StartedAt).TotalSeconds,
             requests = metrics.Requests,
             errors = metrics.Errors,
@@ -115,6 +122,7 @@ public static class Server
             $"openrec_active_requests {metrics.ActiveRequests}\n" +
             $"openrec_users_total {auth.UserCount}\n" +
             $"openrec_rooms_total {rooms.Count}\n" +
+            $"openrec_moderation_reports {moderation.Reports().Count}\n" +
             $"openrec_uptime_seconds {(long)(DateTimeOffset.UtcNow - metrics.StartedAt).TotalSeconds}\n",
             "text/plain"));
 
@@ -222,6 +230,130 @@ public static class Server
                 return Results.NotFound(new { error = "room_not_found" });
             }
             return rooms.Delete(id, user) ? Results.NoContent() : Results.Forbid();
+        });
+
+        app.MapPost("/api/v1/moderation/reports", async (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var request = await context.Request.ReadFromJsonAsync<ReportRequest>();
+            if (request is null || string.IsNullOrWhiteSpace(request.Reason))
+            {
+                return Results.BadRequest(new { error = "invalid_report" });
+            }
+            return Results.Created("/api/v1/moderation/reports", moderation.CreateReport(user, request));
+        });
+
+        app.MapGet("/api/v1/moderation/reports", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : moderation.IsModerator(user) ? Results.Ok(new { reports = moderation.Reports() }) : Results.Forbid();
+        });
+
+        app.MapPost("/api/v1/moderation/bans", async (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            var request = await context.Request.ReadFromJsonAsync<BanUserRequest>();
+            if (request is null)
+            {
+                return Results.BadRequest(new { error = "invalid_request" });
+            }
+            var ban = moderation.Ban(user, request);
+            return ban is null ? Results.Forbid() : Results.Ok(ban);
+        });
+
+        app.MapDelete("/api/v1/moderation/bans/{userId:guid}", (Guid userId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : moderation.Unban(user, userId) ? Results.NoContent() : Results.Forbid();
+        });
+
+        app.MapGet("/api/v1/moderation/bans", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : moderation.IsModerator(user) ? Results.Ok(new { bans = moderation.Bans }) : Results.Forbid();
+        });
+
+        app.MapGet("/api/v1/friends", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : Results.Ok(new { friends = friendships.ListFriends(user.Id) });
+        });
+
+        app.MapGet("/api/v1/friends/requests", (HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : Results.Ok(new { requests = friendships.ListPending(user.Id) });
+        });
+
+        app.MapPost("/api/v1/friends/{userId:guid}", (Guid userId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : friendships.Send(user, userId) ? Results.Accepted() : Results.Conflict(new { error = "friend_request_not_allowed" });
+        });
+
+        app.MapPost("/api/v1/friends/requests/{userId:guid}/accept", (Guid userId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : friendships.Accept(user, userId) ? Results.NoContent() : Results.NotFound(new { error = "friend_request_not_found" });
+        });
+
+        app.MapDelete("/api/v1/friends/requests/{userId:guid}", (Guid userId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : friendships.Decline(user, userId) ? Results.NoContent() : Results.NotFound(new { error = "friend_request_not_found" });
+        });
+
+        app.MapDelete("/api/v1/friends/{userId:guid}", (Guid userId, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            return user is null ? Results.Unauthorized() : friendships.Remove(user, userId) ? Results.NoContent() : Results.NotFound(new { error = "friend_not_found" });
+        });
+
+        app.MapGet("/api/v1/rooms/{id:guid}/chat", (Guid id, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (!rooms.IsMember(id, user.Id))
+            {
+                return Results.Forbid();
+            }
+            var limit = int.TryParse(context.Request.Query["limit"], out var parsedLimit) ? parsedLimit : 50;
+            return Results.Ok(new { messages = chat.History(id, limit) });
+        });
+
+        app.MapPost("/api/v1/rooms/{id:guid}/chat", async (Guid id, HttpContext context) =>
+        {
+            var user = auth.Authenticate(context);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (moderation.IsBanned(user.Id))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            if (!rooms.IsMember(id, user.Id))
+            {
+                return Results.Forbid();
+            }
+            var request = await context.Request.ReadFromJsonAsync<SendMessageRequest>();
+            if (request is null || string.IsNullOrWhiteSpace(request.Content))
+            {
+                return Results.BadRequest(new { error = "invalid_message" });
+            }
+            var message = chat.Add(user, id, request.Content, moderation.ContainsBlockedWord(request.Content));
+            return message is null ? Results.BadRequest(new { error = "message_rejected" }) : Results.Created($"/api/v1/rooms/{id}/chat", message);
         });
 
         app.Run(async context =>

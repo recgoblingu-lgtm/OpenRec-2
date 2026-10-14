@@ -6,7 +6,9 @@ OpenRec-2 is a modular C# server backend for legacy Rec Room-compatible clients.
 
 OpenRec-2 provides configurable server identity, supported client version, region, CDN URI, request size, and CORS. It includes health and readiness checks, runtime status, Prometheus-compatible metrics, request correlation IDs, structured JSON errors, and compatibility dispatch for the existing legacy API surface.
 
-The server now also provides account registration and login with salted PBKDF2 password hashing, expiring bearer sessions, logout, and authenticated identity lookup. Room management supports public or private rooms, activity and region filtering, capacity limits, membership tracking, join and leave operations, and owner-only deletion.
+The server provides account registration and login with salted PBKDF2 password hashing, expiring bearer sessions, logout, and authenticated identity lookup. Room management supports public or private rooms, activity and region filtering, capacity limits, membership tracking, join and leave operations, owner-only deletion, and room chat history.
+
+Social features include friend requests, acceptance, decline, removal, and friend-list retrieval. Moderation features include user reports, configurable moderator roles, temporary or permanent bans, unbanning, moderator report and ban queues, blocked-word chat filtering, and chat restrictions for banned users.
 
 ## Run
 
@@ -14,6 +16,8 @@ The server now also provides account registration and login with salted PBKDF2 p
 dotnet run --urls http://localhost:5229
 ```
 
-The service exposes `GET /health`, `GET /ready`, `GET /api/v1/status`, and `GET /metrics`. Authentication is available under `/api/v1/auth`, and room management is available under `/api/v1/rooms`.
+The service exposes `GET /health`, `GET /ready`, `GET /api/v1/status`, and `GET /metrics`. Authentication is available under `/api/v1/auth`, room management and chat are available under `/api/v1/rooms`, friend features are available under `/api/v1/friends`, and moderation is available under `/api/v1/moderation`.
 
-The project targets .NET 10 and reads server settings from `appsettings.json`. The current account and room stores are process-local and should be replaced with a durable database before production deployment.
+Set `Server:ModeratorUsernames` and `Server:BlockedChatWords` in `appsettings.json` to configure moderation. The current account, session, room, social, and moderation stores are process-local and should be replaced with durable storage before production deployment.
+
+The project targets .NET 10.

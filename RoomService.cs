@@ -55,6 +55,11 @@ public sealed class RoomService
         return _rooms.TryGetValue(id, out var room) ? ToSummary(room) : null;
     }
 
+    public bool IsMember(Guid id, Guid userId)
+    {
+        return _rooms.TryGetValue(id, out var room) && lockMemberCheck(room, userId);
+    }
+
     public bool Join(Guid id, UserAccount user)
     {
         if (!_rooms.TryGetValue(id, out var room))
@@ -95,6 +100,14 @@ public sealed class RoomService
     }
 
     public int Count => _rooms.Count;
+
+    private static bool lockMemberCheck(Room room, Guid userId)
+    {
+        lock (room.SyncRoot)
+        {
+            return room.Members.Contains(userId);
+        }
+    }
 
     private static RoomSummary ToSummary(Room room)
     {
